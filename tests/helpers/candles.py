@@ -122,3 +122,160 @@ def load_eurusd_h4_fixture() -> pd.DataFrame:
     frame["time"] = pd.to_datetime(frame["time"], utc=True)
 
     return frame
+
+
+def reflect_candles(
+    candles: pd.DataFrame,
+    center: float,
+) -> pd.DataFrame:
+    """
+    Mirror a candle series around `center`, turning a bullish fixture
+    into an equivalent bearish one (or vice versa).
+
+    True Range (high - low) is preserved exactly under this
+    reflection, so ATR-derived thresholds behave identically to the
+    original series -- only the direction of every comparison flips,
+    which is why a verified bullish sequence's mirror image is a
+    verified bearish sequence, with no separate manual construction
+    or re-verification required.
+    """
+
+    reflected = candles.copy()
+
+    reflected["open"] = 2 * center - candles["open"]
+    reflected["close"] = 2 * center - candles["close"]
+    reflected["high"] = 2 * center - candles["low"]
+    reflected["low"] = 2 * center - candles["high"]
+
+    return reflected
+
+
+def build_ict_bias_candles(*, freq: str = "4h") -> pd.DataFrame:
+    """
+    Deterministic bullish H4/H1-style candle series producing a
+    confirmed bullish `external_trend` from the canonical engine's
+    default swing parameters (left_bars=right_bars=3).
+
+    Used for the frozen EURUSD manual-signal strategy's H4 bias / H1
+    confirmation steps. Reflect with `reflect_candles` for the bearish
+    mirror.
+    """
+
+    return build_zigzag_candles(
+        waypoints=[1.0900, 1.0850, 1.0950, 1.0900, 1.1000, 1.0950, 1.1050],
+        candles_per_leg=8,
+        freq=freq,
+    )
+
+
+def build_ict_m15_sequence_candles(*, freq: str = "15min") -> pd.DataFrame:
+    """
+    Deterministic bullish M15 candle series exercising the full
+    frozen entry sequence under swing_options={"left_bars": 1,
+    "right_bars": 1}:
+
+    - an EQL (sell-side liquidity) pool forms from two near-equal
+      classified swing lows,
+    - a later candle sweeps it (wicks below, closes back above),
+    - price rallies through a bearish-then-weak-bodied MSS candle
+      (deliberately too weak-bodied to itself spawn an Order Block),
+    - a further pullback (HL) and a strong-bodied breakout (HH)
+      confirm a bullish CHoCH,
+    - the CHoCH's own displacement creates a confirmed bullish Order
+      Block anchored on the pullback candle,
+    - a final pullback candle retraces into (mitigates) that Order
+      Block.
+
+    Verified against app.analysis.analysis_engine.analyze_market
+    directly (not merely asserted) before being committed here.
+    Reflect with `reflect_candles` for the bearish mirror.
+    """
+
+    base = build_zigzag_candles(
+        waypoints=[
+            1.09700,
+            1.10200,
+            1.09900,
+            1.10150,
+            1.09600,
+            1.10050,
+            1.09620,
+        ],
+        candles_per_leg=2,
+        freq=freq,
+    )
+
+    extra_rows = [
+        (1.09620, 1.09720, 1.09600, 1.09700),  # mild transit
+        (1.09700, 1.09710, 1.09540, 1.09690),  # liquidity sweep
+        (1.09690, 1.09870, 1.09685, 1.09860),  # transit up
+        (1.10000, 1.10800, 1.09980, 1.10250),  # MSS (weak body)
+        (1.10600, 1.10850, 1.09950, 1.10300),  # pullback HL (OB source candle)
+        (1.10300, 1.11200, 1.10290, 1.11000),  # HH confirms CHoCH
+        (1.11000, 1.11010, 1.10000, 1.10050),  # retracement into OB
+        (1.10050, 1.10600, 1.10040, 1.10550),  # continuation
+    ]
+
+    extra_times = pd.date_range(
+        base["time"].iloc[-1] + pd.Timedelta(freq),
+        periods=len(extra_rows),
+        freq=freq,
+    )
+
+    extra = pd.DataFrame(
+        extra_rows,
+        columns=["open", "high", "low", "close"],
+    )
+    extra.insert(0, "time", extra_times)
+
+    return pd.concat([base, extra], ignore_index=True)
+
+
+def build_ict_m5_sequence_candles(*, freq: str = "5min") -> pd.DataFrame:
+    """
+    Deterministic bullish M5 candle series exercising only the M5
+    execution-confirmation step under swing_options={"left_bars": 1,
+    "right_bars": 1}: a local liquidity sweep followed by a confirmed
+    bullish CHoCH, both within the last 5 candles.
+
+    Verified against app.analysis.analysis_engine.analyze_market
+    directly before being committed here. Reflect with
+    `reflect_candles` for the bearish mirror.
+    """
+
+    base = build_zigzag_candles(
+        waypoints=[
+            1.09700,
+            1.10200,
+            1.09900,
+            1.10150,
+            1.09600,
+            1.10050,
+            1.09620,
+        ],
+        candles_per_leg=2,
+        freq=freq,
+    )
+
+    extra_rows = [
+        (1.09620, 1.09720, 1.09600, 1.09700),  # mild transit
+        (1.09700, 1.09710, 1.09540, 1.09690),  # liquidity sweep
+        (1.10000, 1.10800, 1.09980, 1.10250),  # MSS
+        (1.10600, 1.10850, 1.09950, 1.10300),  # pullback HL
+        (1.10300, 1.11200, 1.10290, 1.11000),  # HH confirms CHoCH
+        (1.11000, 1.11010, 1.10990, 1.11005),  # right-neighbour filler
+    ]
+
+    extra_times = pd.date_range(
+        base["time"].iloc[-1] + pd.Timedelta(freq),
+        periods=len(extra_rows),
+        freq=freq,
+    )
+
+    extra = pd.DataFrame(
+        extra_rows,
+        columns=["open", "high", "low", "close"],
+    )
+    extra.insert(0, "time", extra_times)
+
+    return pd.concat([base, extra], ignore_index=True)
