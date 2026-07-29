@@ -131,12 +131,15 @@ def test_analyze_endpoint_is_registered_as_post_api_v2_analyze():
 
 
 def test_no_additional_endpoint_aliases_were_added():
-    # Explicit instruction: do not add any additional endpoint aliases.
+    # Explicit instruction: do not add any additional aliases of the
+    # analyze endpoint itself. Scoped to "analyze" only (not "v2"
+    # generally) so that unrelated, legitimately-added v2 endpoints
+    # (e.g. Phase 3's /api/v2/strategy/smc-signal) are not mistaken
+    # for an analyze alias.
     analyze_paths = [
         route.path
         for route in main.app.routes
         if "analyze" in getattr(route, "path", "").lower()
-        or "v2" in getattr(route, "path", "").lower()
     ]
 
     assert analyze_paths == ["/api/v2/analyze"]

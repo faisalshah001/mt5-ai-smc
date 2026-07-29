@@ -22,6 +22,10 @@ from app.mt5.market import get_candles
 from app.risk.calculator import calculate_trade_levels
 from app.security import ApiKeyMiddleware
 from app.strategies.multi_timeframe import analyse_multiple_timeframes
+from app.strategies.smc_manual_signal import (
+    SYMBOL as SMC_MANUAL_SIGNAL_SYMBOL,
+    generate_eurusd_manual_signal,
+)
 from app.strategies.trend import analyse_trend
 
 
@@ -689,3 +693,78 @@ def analyze_endpoint(request: AnalyzeRequest) -> dict[str, Any]:
         "structure_snapshot": structure_snapshot,
         "metadata": result.metadata,
     }
+
+
+class SmcSignalRequest(BaseModel):
+    """
+    Request body for the manual EURUSD ICT/SMC signal endpoint
+    (POST /api/v2/strategy/smc-signal).
+
+    The frozen manual-signal strategy supports EURUSD only -- symbol
+    is accepted here (rather than hardcoded) purely so a mismatched
+    value is rejected explicitly with HTTP 400, instead of the
+    request silently being interpreted as EURUSD regardless of what
+    was asked for.
+    """
+
+    symbol: str = Field(
+        default="EURUSD",
+        description="Trading symbol. Only 'EURUSD' is supported.",
+    )
+
+
+@app.post("/api/v2/strategy/smc-signal")
+def smc_signal_endpoint(
+    request: SmcSignalRequest,
+) -> dict[str, Any]:
+    """
+    Manual-approval-only EURUSD ICT/SMC trade signal.
+
+    Runs the frozen entry sequence -- H4 bias -> H1 confirmation ->
+    M15 liquidity sweep -> confirmed CHoCH -> displacement -> linked
+    Order Block -> retracement -> M5 execution confirmation -> risk
+    validation -- via
+    app.strategies.smc_manual_signal.generate_eurusd_manual_signal(),
+    and returns its output unchanged.
+
+    This endpoint never places an order. It returns a trade proposal
+    only (status "SIGNAL_PENDING_APPROVAL", "NO_SETUP", or "BLOCKED")
+    for manual human review and execution.
+    """
+    try:
+        clean_symbol = request.symbol.strip().upper()
+
+        if clean_symbol != SMC_MANUAL_SIGNAL_SYMBOL:
+            raise ValueError(
+                "This endpoint only supports "
+                f"{SMC_MANUAL_SIGNAL_SYMBOL}. Received "
+                f"'{clean_symbol}'."
+            )
+
+        result = generate_eurusd_manual_signal()
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        ) from error
+
+    except MT5TimeoutError as error:
+        raise HTTPException(
+            status_code=503,
+            detail=str(error),
+        ) from error
+
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        ) from error
+
+    except Exception:
+        logger.exception(
+            "Unexpected error in /api/v2/strategy/smc-signal."
+        )
+        raise
+
+    return result
