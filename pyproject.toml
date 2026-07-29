@@ -1,0 +1,126 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mt5-ai-bridge"
+version = "1.0.0"
+description = "Read-only MetaTrader 5 analysis bridge implementing an institutional Smart Money Concepts (SMC) structure-analysis pipeline, exposed over FastAPI."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Faisal Shah" }]
+keywords = [
+    "metatrader5",
+    "trading",
+    "smart-money-concepts",
+    "market-structure",
+    "fastapi",
+    "algorithmic-trading",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Mirrors requirements.txt exactly -- see that file for the full,
+# pip-freeze-pinned transitive dependency set used in development.
+# This list is the direct, top-level runtime dependency set only.
+dependencies = [
+    "fastapi==0.140.0",
+    "uvicorn==0.51.0",
+    "pydantic==2.13.4",
+    "pandas==3.0.5",
+    "numpy==2.5.1",
+    "MetaTrader5==5.0.5735",
+    "python-dotenv==1.2.2",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest==9.1.1",
+]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.0",
+    "black==26.5.1",
+    "mypy==2.3.0",
+    "pandas-stubs",
+]
+
+[project.urls]
+Documentation = "docs/ARCHITECTURE.md"
+Specification = "SMC_SPECIFICATION.md"
+Changelog = "CHANGELOG.md"
+
+# --------------------------------------------------------------------
+# Tool configuration
+# --------------------------------------------------------------------
+#
+# NOTE (Release Engineering phase): ruff's classic default rule set
+# (E4, E7, E9, F) passes cleanly against this codebase as-is and is
+# configured below as the enforced CI gate. `black` and `mypy` are
+# also configured here and run in CI, but are informational
+# (non-blocking) for this initial release: this codebase's existing,
+# deliberately vertical formatting style predates black's involvement
+# and was never intended to match it, and several mypy findings stem
+# from pandas/Literal-narrowing limitations rather than real defects
+# (the full, passing test suite is the actual correctness signal for
+# this pipeline -- see docs/TESTING.md). Tightening either into a
+# blocking gate is a deliberate, separate, future decision requiring
+# its own reformatting/typing pass across production files, which is
+# explicitly out of scope for this phase. See docs/TROUBLESHOOTING.md
+# and the Release Engineering deliverables for the full rationale.
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+# Deliberately the classic minimal set (pyflakes + a handful of
+# pycodestyle checks) -- already fully clean against this codebase.
+# Broader rule categories (import sorting, pyupgrade modernisation,
+# simplification suggestions) are not enabled here because satisfying
+# them would require editing production files, which this phase does
+# not authorise.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311", "py312", "py313"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_configs = true
+# Informational mode for this release -- see the note above. Flip to
+# a stricter profile only alongside a dedicated typing-hardening pass.
+check_untyped_defs = false
+
+# pytest configuration lives in the pre-existing pytest.ini at the
+# repository root (testpaths = tests, pythonpath = .) -- pytest.ini
+# takes precedence over any [tool.pytest.ini_options] table here, so
+# no duplicate, inert config is defined in this file.
+
+# Explicit package discovery (Release Engineering phase). Without
+# this, setuptools' flat-layout auto-discovery scans the entire
+# working directory and fails with "Multiple top-level packages
+# discovered" the moment a local virtual environment (e.g. venv/,
+# venv_old/ -- both gitignored, but still present on disk during a
+# local `python -m build`) sits next to the project. Scoping
+# discovery to the actual package/module set makes the build
+# reproducible regardless of what else happens to exist in the
+# working tree.
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]

@@ -1,0 +1,18 @@
+[
+  {
+    "event_id": "EV_LIQ_00001",
+    "event_type": "LIQUIDITY_CREATED",
+    "time": "2026-07-20T08:00:00+00:00",
+    "index": 73,
+    "direction": "bearish",
+    "price": 1.145085,
+    "broken_level": null,
+    "source_id": "EQH_1",
+    "source_type": "BSL",
+    "strength": null,
+    "description": "Equal highs created buy-side liquidity.",
+    "metadata": {
+      "difference_pips": 2.6999999999999247
+    }
+  }
+]

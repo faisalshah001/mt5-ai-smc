@@ -1,0 +1,19 @@
+{
+  "external_trend": "bearish",
+  "structure_state": "bearish",
+  "latest_swing_high": 1.14357,
+  "latest_swing_low": 1.13639,
+  "protected_high": 1.14357,
+  "protected_low": null,
+  "latest_event": "MSS",
+  "latest_event_direction": "bullish",
+  "updated_time": "2026-07-24T16:00:00+00:00",
+  "updated_index": 99,
+  "metadata": {
+    "source": "state_machine",
+    "latest_event_index": 90,
+    "latest_event_time": "2026-07-23T04:00:00+00:00",
+    "latest_event_broken_level": 1.14286,
+    "latest_event_price": 1.14326
+  }
+}

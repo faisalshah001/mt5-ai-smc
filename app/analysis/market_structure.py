@@ -100,7 +100,24 @@ def classify_market_structure(
     structure: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Classify confirmed swing points.
+    Classify confirmed swing points using a single, whole-series,
+    never-reset comparison baseline (previous_high/previous_low
+    tracked globally from the first row onward, across every trend
+    cycle).
+
+    LEGACY-ONLY (SMC_SPECIFICATION.md §7, Decision #3, point 7): this
+    global classifier now serves only the legacy
+    /analysis/market-structure pipeline (main.py), for the duration of
+    Decision B's Phase 1/2 deprecation window. It is deliberately
+    unchanged and must remain byte-identical throughout that window
+    (§7 point 9, acceptance criterion 6). The canonical pipeline
+    (analysis_engine.py::analyze_market) no longer calls this function
+    — app.analysis.state_machine.detect_structure_state performs
+    per-trend-cycle classification itself, in the same unified forward
+    pass as state-transition detection, per §7 points 1-6. This is not
+    an undocumented fallback: it is the explicitly frozen, temporary
+    two-engine state Decision B already approves, retired only when
+    the legacy endpoint itself is removed (§7 point 8).
 
     HH = Higher High
     LH = Lower High

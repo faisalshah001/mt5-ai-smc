@@ -10,6 +10,7 @@ import pandas as pd
 EventType = Literal[
     "BOS",
     "MSS",
+    "MSS_INVALIDATED",
     "CHoCH",
     "LIQUIDITY_CREATED",
     "LIQUIDITY_SWEPT",
@@ -18,6 +19,7 @@ EventType = Literal[
     "ORDER_BLOCK_CREATED",
     "ORDER_BLOCK_MITIGATED",
     "ORDER_BLOCK_INVALIDATED",
+    "ORDER_BLOCK_CONFIRMED",
     "FVG_CREATED",
     "FVG_FILLED",
 ]
@@ -51,6 +53,17 @@ OrderBlockStatus = Literal[
     "mitigated",
     "invalidated",
     "expired",
+]
+
+# Decision #12, SMC_SPECIFICATION.md §28/Appendix B.
+OrderBlockConfirmationStatus = Literal[
+    "provisional",
+    "confirmed",
+]
+
+OrderBlockInvalidationReason = Literal[
+    "price_penetration",
+    "mss_invalidated",
 ]
 
 
@@ -354,6 +367,17 @@ class OrderBlock:
 
     status: OrderBlockStatus = "active"
 
+    # Decision #12 (§28/Appendix B): defaults to "confirmed" because
+    # BOS/CHoCH-sourced blocks are terminal by construction. MSS-sourced
+    # blocks are explicitly created with confirmation_status="provisional"
+    # by detect_order_blocks — see order_blocks.py.
+    confirmation_status: OrderBlockConfirmationStatus = "confirmed"
+
+    confirming_event_id: Optional[str] = None
+    confirming_event_type: Optional[str] = None
+    confirmed_time: Optional[datetime] = None
+    confirmed_index: Optional[int] = None
+
     source_event_id: Optional[str] = None
     source_event_type: Optional[str] = None
     source_broken_level: Optional[float] = None
@@ -374,6 +398,7 @@ class OrderBlock:
     invalidated_time: Optional[datetime] = None
     invalidated_index: Optional[int] = None
     invalidation_price: Optional[float] = None
+    invalidation_reason: Optional[OrderBlockInvalidationReason] = None
 
     expired: bool = False
     expired_time: Optional[datetime] = None
@@ -456,9 +481,14 @@ class OrderBlock:
         time: datetime,
         index: int,
         price: float,
+        reason: OrderBlockInvalidationReason = "price_penetration",
     ) -> None:
         """
         Mark the Order Block as invalidated.
+
+        reason distinguishes ordinary distal-level-breach invalidation
+        (the default) from Decision #12's MSS-invalidation cascade
+        (SMC_SPECIFICATION.md §28 point 3).
         """
 
         self.status = "invalidated"
@@ -466,6 +496,36 @@ class OrderBlock:
         self.invalidated_time = time
         self.invalidated_index = index
         self.invalidation_price = price
+        self.invalidation_reason = reason
+
+    def mark_confirmed(
+        self,
+        *,
+        time: datetime,
+        index: int,
+        confirming_event_id: str,
+        confirming_event_type: str,
+    ) -> None:
+        """
+        Promote the Order Block from provisional to confirmed.
+
+        Decision #12 (§28 point 4, §10 INVARIANT point 5): this is a
+        one-way transition, applied at most once per Order Block, for
+        the relationship between one specific pending MSS and its own
+        confirming CHoCH. Callers are responsible for only invoking
+        this when that relationship genuinely applies — mirroring the
+        existing mark_mitigated()/mark_invalidated()/mark_expired()
+        pattern, this method itself performs no idempotency check.
+        source_event_id, source_event_type, created_time, and
+        created_index are untouched — the block's original MSS
+        provenance and creation timestamp are preserved permanently.
+        """
+
+        self.confirmation_status = "confirmed"
+        self.confirming_event_id = confirming_event_id
+        self.confirming_event_type = confirming_event_type
+        self.confirmed_time = time
+        self.confirmed_index = index
 
     def mark_expired(
         self,
@@ -492,6 +552,7 @@ class OrderBlock:
         datetime_fields = [
             "created_time",
             "candle_time",
+            "confirmed_time",
             "mitigated_time",
             "invalidated_time",
             "expired_time",

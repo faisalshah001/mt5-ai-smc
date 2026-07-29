@@ -1,0 +1,43 @@
+[
+  {
+    "liquidity_id": "EQH_1",
+    "liquidity_type": "BSL",
+    "level": 1.145085,
+    "created_time": "2026-07-20T08:00:00+00:00",
+    "created_index": 73,
+    "first_swing_time": "2026-07-17T08:00:00+00:00",
+    "first_swing_index": 67,
+    "first_swing_price": 1.14522,
+    "second_swing_time": "2026-07-20T08:00:00+00:00",
+    "second_swing_index": 73,
+    "second_swing_price": 1.14495,
+    "status": "active",
+    "swept": false,
+    "swept_time": null,
+    "swept_index": null,
+    "sweep_price": null,
+    "sweep_close": null,
+    "sweep_distance": null,
+    "sweep_distance_pips": null,
+    "sweep_direction": null,
+    "broken": false,
+    "broken_time": null,
+    "broken_index": null,
+    "break_price": null,
+    "break_close": null,
+    "break_distance": null,
+    "break_distance_pips": null,
+    "consumed": false,
+    "consumed_time": null,
+    "consumed_index": null,
+    "expired": false,
+    "expired_time": null,
+    "expired_index": null,
+    "touches": 2,
+    "metadata": {
+      "tolerance_pips": 5.0,
+      "difference_pips": 2.6999999999999247
+    },
+    "is_active": true
+  }
+]

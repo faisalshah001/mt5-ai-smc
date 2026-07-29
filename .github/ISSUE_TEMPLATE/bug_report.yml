@@ -1,0 +1,69 @@
+name: Bug report
+description: Something behaves differently than documented or expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please check
+        [docs/TROUBLESHOOTING.md](../../docs/TROUBLESHOOTING.md) first —
+        many common issues (MT5 unavailable, validation failures, missing
+        events, unexpected MSS) are already documented there.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the actual vs. expected behaviour.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: >
+        The exact endpoint/request (or Python call) and, if relevant, the
+        candle data or fixture that triggers it. Do not paste MT5 account
+        credentials or any secret.
+      placeholder: |
+        POST /api/v2/analyze
+        {"symbol": "EURUSD", "timeframe": "H4", "count": 200}
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What you expected to happen instead, and why (cite a doc/spec section if relevant).
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Application version (pyproject.toml) and/or `pipeline_version` from the API response.
+      placeholder: "e.g. 1.0.0 / pipeline_version 3.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Which engine?
+      options:
+        - Canonical (/api/v2/analyze)
+        - Legacy (/analysis/market-structure)
+        - Not applicable (other endpoint)
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, whether MT5 terminal was running/logged in.
+    validations:
+      required: false

@@ -1,8 +1,13 @@
+import logging
 from typing import Final
 
 import MetaTrader5 as mt5
 import pandas as pd
 
+from app.mt5.executor import run_mt5
+
+
+logger = logging.getLogger(__name__)
 
 TIMEFRAMES: Final[dict[str, int]] = {
     "M1": mt5.TIMEFRAME_M1,
@@ -43,12 +48,13 @@ def get_candles(
     if count < 1:
         raise ValueError("Candle count must be greater than zero.")
 
-    if not mt5.symbol_select(clean_symbol, True):
+    if not run_mt5(mt5.symbol_select, clean_symbol, True):
         raise ValueError(
             f"Symbol '{clean_symbol}' could not be selected in MT5."
         )
 
-    rates = mt5.copy_rates_from_pos(
+    rates = run_mt5(
+        mt5.copy_rates_from_pos,
         clean_symbol,
         TIMEFRAMES[clean_timeframe],
         0,
@@ -56,13 +62,28 @@ def get_candles(
     )
 
     if rates is None:
+        error = run_mt5(mt5.last_error)
+
+        logger.error(
+            "MT5 candle retrieval failed for %s %s: %s",
+            clean_symbol,
+            clean_timeframe,
+            error,
+        )
+
         raise RuntimeError(
-            f"Unable to retrieve candles from MT5: {mt5.last_error()}"
+            f"Unable to retrieve candles from MT5: {error}"
         )
 
     frame = pd.DataFrame(rates)
 
     if frame.empty:
+        logger.warning(
+            "MT5 returned no candle data for %s %s.",
+            clean_symbol,
+            clean_timeframe,
+        )
+
         raise ValueError(
             f"No candle data returned for "
             f"{clean_symbol} {clean_timeframe}."

@@ -1,0 +1,54 @@
+name: Feature request
+description: Suggest a new capability or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before requesting a change to **trading/SMC logic** (classification,
+        state machine, liquidity, Order Blocks, event semantics): this
+        project does not implement trading-logic changes without an approved
+        entry in `SMC_SPECIFICATION.md` first — see
+        [docs/CONTRIBUTING.md](../../docs/CONTRIBUTING.md#6-how-to-add-a-new-decision).
+        A feature request here is the right place to *propose* that, not to
+        request the code change directly.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - SMC trading logic (requires a spec Decision first)
+        - API / endpoint surface
+        - Documentation
+        - Developer tooling / CI
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The gap or limitation you're running into today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: >
+        What you'd like to see. For trading-logic proposals, be as precise
+        as you can about the exact rule — vague proposals are the hardest
+        kind to turn into a spec Decision.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches you thought about and why you didn't prefer them.
+    validations:
+      required: false

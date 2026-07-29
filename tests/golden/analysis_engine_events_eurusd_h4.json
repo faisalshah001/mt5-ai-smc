@@ -1,0 +1,247 @@
+[
+  {
+    "event_id": "EV_STR_00001",
+    "event_type": "MSS",
+    "time": "2026-07-09T16:00:00+00:00",
+    "index": 33,
+    "direction": "bullish",
+    "price": 1.14369,
+    "broken_level": 1.14316,
+    "source_id": null,
+    "source_type": "MARKET_STRUCTURE",
+    "strength": 2.9256302201200732,
+    "description": "Bullish Market Structure Shift detected.",
+    "metadata": {
+      "break_distance": 0.0005300000000001415,
+      "required_break_distance": 0.00018115754901464932,
+      "trend_before": "bearish",
+      "trend_after": "bearish",
+      "state_before": "bearish",
+      "state_after": "mss_bullish",
+      "mss_origin_level": 1.14316
+    }
+  },
+  {
+    "event_id": "EV_STR_00002",
+    "event_type": "MSS_INVALIDATED",
+    "time": "2026-07-14T00:00:00+00:00",
+    "index": 47,
+    "direction": "bearish",
+    "price": 1.13849,
+    "broken_level": 1.14316,
+    "source_id": null,
+    "source_type": "MARKET_STRUCTURE",
+    "strength": null,
+    "description": "Market Structure Shift invalidated; trend reasserted as bearish.",
+    "metadata": {
+      "required_break_distance": 0.0002180187803203004,
+      "trend_before": "bearish",
+      "trend_after": "bearish",
+      "state_before": "mss_bullish",
+      "state_after": "bearish",
+      "mss_origin_index": 33,
+      "mss_origin_event_id": "EV_STR_00001"
+    }
+  },
+  {
+    "event_id": "EV_STR_00003",
+    "event_type": "MSS",
+    "time": "2026-07-15T20:00:00+00:00",
+    "index": 58,
+    "direction": "bullish",
+    "price": 1.14602,
+    "broken_level": 1.14459,
+    "source_id": null,
+    "source_type": "MARKET_STRUCTURE",
+    "strength": 5.872581042489243,
+    "description": "Bullish Market Structure Shift detected.",
+    "metadata": {
+      "break_distance": 0.0014300000000000423,
+      "required_break_distance": 0.00024350451524699616,
+      "trend_before": "bearish",
+      "trend_after": "bearish",
+      "state_before": "bearish",
+      "state_after": "mss_bullish",
+      "mss_origin_level": 1.14459
+    }
+  },
+  {
+    "event_id": "EV_LIQ_00001",
+    "event_type": "LIQUIDITY_CREATED",
+    "time": "2026-07-20T08:00:00+00:00",
+    "index": 73,
+    "direction": "bearish",
+    "price": 1.145085,
+    "broken_level": null,
+    "source_id": "EQH_1",
+    "source_type": "BSL",
+    "strength": null,
+    "description": "Equal highs created buy-side liquidity.",
+    "metadata": {
+      "difference_pips": 2.6999999999999247
+    }
+  },
+  {
+    "event_id": "EV_STR_00004",
+    "event_type": "MSS_INVALIDATED",
+    "time": "2026-07-20T16:00:00+00:00",
+    "index": 75,
+    "direction": "bearish",
+    "price": 1.14117,
+    "broken_level": 1.14459,
+    "source_id": null,
+    "source_type": "MARKET_STRUCTURE",
+    "strength": null,
+    "description": "Market Structure Shift invalidated; trend reasserted as bearish.",
+    "metadata": {
+      "required_break_distance": 0.0001902092840417486,
+      "trend_before": "bearish",
+      "trend_after": "bearish",
+      "state_before": "mss_bullish",
+      "state_after": "bearish",
+      "mss_origin_index": 58,
+      "mss_origin_event_id": "EV_STR_00003"
+    }
+  },
+  {
+    "event_id": "EV_OB_00001",
+    "event_type": "ORDER_BLOCK_CREATED",
+    "time": "2026-07-21T20:00:00+00:00",
+    "index": 82,
+    "direction": "bearish",
+    "price": 1.14158,
+    "broken_level": 1.14025,
+    "source_id": "OB_00001",
+    "source_type": "BOS",
+    "strength": null,
+    "description": "Bearish Order Block created after BOS.",
+    "metadata": {
+      "source_event_id": "STR_BOS_00082",
+      "source_candle_index": 79,
+      "distal_level": 1.14276,
+      "proximal_level": 1.14158,
+      "displacement_atr": 1.7880077396582463,
+      "event_body_ratio": 0.7218045112783411,
+      "liquidity_sweep_confirmed": false
+    }
+  },
+  {
+    "event_id": "EV_STR_00005",
+    "event_type": "BOS",
+    "time": "2026-07-21T20:00:00+00:00",
+    "index": 82,
+    "direction": "bearish",
+    "price": 1.13984,
+    "broken_level": 1.14025,
+    "source_id": null,
+    "source_type": "MARKET_STRUCTURE",
+    "strength": 2.5105588125339415,
+    "description": "Bearish continuation Break of Structure confirmed.",
+    "metadata": {
+      "break_distance": 0.00041000000000002146,
+      "required_break_distance": 0.00016331025505281942,
+      "trend_before": "bearish",
+      "trend_after": "bearish",
+      "state_before": "bearish",
+      "state_after": "bearish"
+    }
+  },
+  {
+    "event_id": "EV_OB_00002",
+    "event_type": "ORDER_BLOCK_MITIGATED",
+    "time": "2026-07-22T08:00:00+00:00",
+    "index": 85,
+    "direction": "bearish",
+    "price": 1.14181,
+    "broken_level": null,
+    "source_id": "OB_00001",
+    "source_type": "bearish",
+    "strength": null,
+    "description": "Price returned into the bearish Order Block.",
+    "metadata": {
+      "mitigation_percentage": 19.491525423725463
+    }
+  },
+  {
+    "event_id": "EV_OB_00003",
+    "event_type": "ORDER_BLOCK_CREATED",
+    "time": "2026-07-23T04:00:00+00:00",
+    "index": 90,
+    "direction": "bullish",
+    "price": 1.14136,
+    "broken_level": 1.14286,
+    "source_id": "OB_00002",
+    "source_type": "MSS",
+    "strength": null,
+    "description": "Bullish Order Block created after MSS.",
+    "metadata": {
+      "source_event_id": "STR_MSS_00090",
+      "source_candle_index": 86,
+      "distal_level": 1.14005,
+      "proximal_level": 1.14136,
+      "displacement_atr": 2.1592207773022163,
+      "event_body_ratio": 0.7817258883247987,
+      "liquidity_sweep_confirmed": false
+    }
+  },
+  {
+    "event_id": "EV_STR_00006",
+    "event_type": "MSS",
+    "time": "2026-07-23T04:00:00+00:00",
+    "index": 90,
+    "direction": "bullish",
+    "price": 1.14326,
+    "broken_level": 1.14286,
+    "source_id": null,
+    "source_type": "MARKET_STRUCTURE",
+    "strength": 2.690617791030557,
+    "description": "Bullish Market Structure Shift detected.",
+    "metadata": {
+      "break_distance": 0.00039999999999995595,
+      "required_break_distance": 0.0001486647421025,
+      "trend_before": "bearish",
+      "trend_after": "bearish",
+      "state_before": "bearish",
+      "state_after": "mss_bullish",
+      "mss_origin_level": 1.14286
+    }
+  },
+  {
+    "event_id": "EV_OB_00004",
+    "event_type": "ORDER_BLOCK_MITIGATED",
+    "time": "2026-07-23T08:00:00+00:00",
+    "index": 91,
+    "direction": "bullish",
+    "price": 1.14069,
+    "broken_level": null,
+    "source_id": "OB_00002",
+    "source_type": "bullish",
+    "strength": null,
+    "description": "Price returned into the bullish Order Block.",
+    "metadata": {
+      "mitigation_percentage": 51.145038167938026
+    }
+  },
+  {
+    "event_id": "EV_STR_00007",
+    "event_type": "MSS_INVALIDATED",
+    "time": "2026-07-23T16:00:00+00:00",
+    "index": 93,
+    "direction": "bearish",
+    "price": 1.138,
+    "broken_level": 1.14286,
+    "source_id": null,
+    "source_type": "MARKET_STRUCTURE",
+    "strength": null,
+    "description": "Market Structure Shift invalidated; trend reasserted as bearish.",
+    "metadata": {
+      "required_break_distance": 0.00017846335218629498,
+      "trend_before": "bearish",
+      "trend_after": "bearish",
+      "state_before": "mss_bullish",
+      "state_after": "bearish",
+      "mss_origin_index": 90,
+      "mss_origin_event_id": "EV_STR_00006"
+    }
+  }
+]

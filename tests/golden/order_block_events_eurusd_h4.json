@@ -1,0 +1,78 @@
+[
+  {
+    "event_id": "EV_OB_00001",
+    "event_type": "ORDER_BLOCK_CREATED",
+    "time": "2026-07-21T20:00:00+00:00",
+    "index": 82,
+    "direction": "bearish",
+    "price": 1.14158,
+    "broken_level": 1.14025,
+    "source_id": "OB_00001",
+    "source_type": "BOS",
+    "strength": null,
+    "description": "Bearish Order Block created after BOS.",
+    "metadata": {
+      "source_event_id": "STR_BOS_00082",
+      "source_candle_index": 79,
+      "distal_level": 1.14276,
+      "proximal_level": 1.14158,
+      "displacement_atr": 1.7880077396582463,
+      "event_body_ratio": 0.7218045112783411,
+      "liquidity_sweep_confirmed": false
+    }
+  },
+  {
+    "event_id": "EV_OB_00002",
+    "event_type": "ORDER_BLOCK_MITIGATED",
+    "time": "2026-07-22T08:00:00+00:00",
+    "index": 85,
+    "direction": "bearish",
+    "price": 1.14181,
+    "broken_level": null,
+    "source_id": "OB_00001",
+    "source_type": "bearish",
+    "strength": null,
+    "description": "Price returned into the bearish Order Block.",
+    "metadata": {
+      "mitigation_percentage": 19.491525423725463
+    }
+  },
+  {
+    "event_id": "EV_OB_00003",
+    "event_type": "ORDER_BLOCK_CREATED",
+    "time": "2026-07-23T04:00:00+00:00",
+    "index": 90,
+    "direction": "bullish",
+    "price": 1.14136,
+    "broken_level": 1.14286,
+    "source_id": "OB_00002",
+    "source_type": "MSS",
+    "strength": null,
+    "description": "Bullish Order Block created after MSS.",
+    "metadata": {
+      "source_event_id": "STR_MSS_00090",
+      "source_candle_index": 86,
+      "distal_level": 1.14005,
+      "proximal_level": 1.14136,
+      "displacement_atr": 2.1592207773022163,
+      "event_body_ratio": 0.7817258883247987,
+      "liquidity_sweep_confirmed": false
+    }
+  },
+  {
+    "event_id": "EV_OB_00004",
+    "event_type": "ORDER_BLOCK_MITIGATED",
+    "time": "2026-07-23T08:00:00+00:00",
+    "index": 91,
+    "direction": "bullish",
+    "price": 1.14069,
+    "broken_level": null,
+    "source_id": "OB_00002",
+    "source_type": "bullish",
+    "strength": null,
+    "description": "Price returned into the bullish Order Block.",
+    "metadata": {
+      "mitigation_percentage": 51.145038167938026
+    }
+  }
+]

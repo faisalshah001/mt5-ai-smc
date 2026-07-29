@@ -1,0 +1,14 @@
+{
+  "engine": "analysis_engine",
+  "pipeline_version": "3.0.0",
+  "input_candle_count": 100,
+  "processed_candle_count": 100,
+  "swing_high_count": 12,
+  "swing_low_count": 8,
+  "structure_event_count": 7,
+  "liquidity_event_count": 1,
+  "order_block_event_count": 4,
+  "total_event_count": 12,
+  "active_liquidity_count": 1,
+  "active_order_block_count": 0
+}

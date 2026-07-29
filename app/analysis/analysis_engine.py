@@ -5,11 +5,9 @@ from typing import Any, Mapping, Optional
 
 import pandas as pd
 
+from app.analysis.candle_validation import validate_and_normalize_candles
 from app.analysis.liquidity import detect_liquidity_registry
-from app.analysis.market_structure import (
-    classify_market_structure,
-    detect_swing_points,
-)
+from app.analysis.market_structure import detect_swing_points
 from app.analysis.models import (
     AnalysisResult,
     MarketEvent,
@@ -20,48 +18,20 @@ from app.analysis.state_machine import detect_structure_state
 from app.indicators.technical import calculate_indicators
 
 
-_REQUIRED_OHLC_COLUMNS = {
-    "time",
-    "open",
-    "high",
-    "low",
-    "close",
-}
-
-_NUMERIC_OHLC_COLUMNS = {
-    "open",
-    "high",
-    "low",
-    "close",
-}
-
-
-def _validate_input(
-    candles: pd.DataFrame,
+def _validate_parameters(
     *,
     symbol: str,
     timeframe: str,
 ) -> None:
     """
-    Validate raw candle data supplied to the analysis engine.
+    Validate the symbol/timeframe parameters supplied to the analysis
+    engine.
+
+    Candle-data validation and normalisation is handled separately by
+    app.analysis.candle_validation.validate_and_normalize_candles —
+    the single, pipeline-independent candle-data-hygiene entry point
+    for this codebase (SMC_SPECIFICATION.md, §3, Decision A).
     """
-    if not isinstance(candles, pd.DataFrame):
-        raise TypeError("candles must be a pandas DataFrame.")
-
-    if candles.empty:
-        raise ValueError("candles cannot be empty.")
-
-    missing_columns = _REQUIRED_OHLC_COLUMNS.difference(
-        candles.columns
-    )
-
-    if missing_columns:
-        missing = ", ".join(sorted(missing_columns))
-
-        raise ValueError(
-            f"Missing required candle columns: {missing}"
-        )
-
     if not isinstance(symbol, str) or not symbol.strip():
         raise ValueError(
             "symbol must be a non-empty string."
@@ -71,138 +41,6 @@ def _validate_input(
         raise ValueError(
             "timeframe must be a non-empty string."
         )
-
-    if candles.index.has_duplicates:
-        raise ValueError(
-            "candles index must not contain duplicate values."
-        )
-
-
-def _prepare_candles(
-    candles: pd.DataFrame,
-) -> pd.DataFrame:
-    """
-    Normalise and validate raw OHLC candle data.
-
-    Processing includes:
-
-    - Copying the source DataFrame
-    - Converting time values to UTC
-    - Converting OHLC values to numeric values
-    - Sorting candles chronologically
-    - Resetting the index to a positional RangeIndex
-    - Validating candle price relationships
-    """
-    result = candles.copy()
-
-    # MT5 returns Unix timestamps in seconds. Preserve support for
-    # already-parsed datetime values and datetime strings as well.
-    if pd.api.types.is_numeric_dtype(result["time"]):
-        result["time"] = pd.to_datetime(
-            result["time"],
-            unit="s",
-            errors="coerce",
-            utc=True,
-        )
-    else:
-        result["time"] = pd.to_datetime(
-            result["time"],
-            errors="coerce",
-            utc=True,
-        )
-
-    invalid_time_mask = result["time"].isna()
-
-    if invalid_time_mask.any():
-        invalid_rows = result.index[
-            invalid_time_mask
-        ].tolist()
-
-        raise ValueError(
-            "The time column contains invalid datetime values "
-            f"at indexes {invalid_rows[:10]}."
-        )
-
-    for column_name in _NUMERIC_OHLC_COLUMNS:
-        result[column_name] = pd.to_numeric(
-            result[column_name],
-            errors="coerce",
-        )
-
-        invalid_numeric_mask = result[column_name].isna()
-
-        if invalid_numeric_mask.any():
-            invalid_rows = result.index[
-                invalid_numeric_mask
-            ].tolist()
-
-            raise ValueError(
-                f"The {column_name!r} column contains invalid "
-                f"numeric values at indexes {invalid_rows[:10]}."
-            )
-
-    if "volume" in result.columns:
-        result["volume"] = pd.to_numeric(
-            result["volume"],
-            errors="coerce",
-        )
-
-    result = (
-        result.sort_values("time", kind="stable")
-        .reset_index(drop=True)
-    )
-
-    if result["time"].duplicated().any():
-        duplicate_times = (
-            result.loc[
-                result["time"].duplicated(keep=False),
-                "time",
-            ]
-            .astype(str)
-            .head(10)
-            .tolist()
-        )
-
-        raise ValueError(
-            "candles contains duplicate timestamps: "
-            f"{duplicate_times}."
-        )
-
-    invalid_high_mask = (
-        (result["high"] < result["open"])
-        | (result["high"] < result["close"])
-        | (result["high"] < result["low"])
-    )
-
-    if invalid_high_mask.any():
-        invalid_rows = result.index[
-            invalid_high_mask
-        ].tolist()
-
-        raise ValueError(
-            "Candle high must be greater than or equal to "
-            "open, close and low. Invalid rows: "
-            f"{invalid_rows[:10]}."
-        )
-
-    invalid_low_mask = (
-        (result["low"] > result["open"])
-        | (result["low"] > result["close"])
-        | (result["low"] > result["high"])
-    )
-
-    if invalid_low_mask.any():
-        invalid_rows = result.index[
-            invalid_low_mask
-        ].tolist()
-
-        raise ValueError(
-            "Candle low must be less than or equal to "
-            "open, close and high. Invalid rows: "
-            f"{invalid_rows[:10]}."
-        )
-
-    return result
 
 
 def _optional_float(
@@ -277,6 +115,7 @@ def _build_structure_events(
 
     - BOS
     - MSS
+    - MSS_INVALIDATED
     - CHoCH
     """
     required_columns = {
@@ -300,6 +139,12 @@ def _build_structure_events(
     events: list[MarketEvent] = []
     event_number = 0
 
+    # Decision #6 (§19): maps each MSS occurrence's origin position to
+    # its own MarketEvent.event_id, built incrementally in row order —
+    # an MSS always precedes its own eventual invalidation (if any),
+    # so a forward-only pass is sufficient; no look-ahead required.
+    mss_event_id_by_origin_position: dict[int, str] = {}
+
     for position, (_, row) in enumerate(
         structure_dataframe.iterrows()
     ):
@@ -307,7 +152,12 @@ def _build_structure_events(
             row.get("structure_event")
         )
 
-        if event_type not in {"BOS", "MSS", "CHoCH"}:
+        if event_type not in {
+            "BOS",
+            "MSS",
+            "MSS_INVALIDATED",
+            "CHoCH",
+        }:
             continue
 
         direction = _optional_text(
@@ -370,6 +220,55 @@ def _build_structure_events(
             else:
                 metadata[metadata_name] = str(value)
 
+        if event_type == "MSS_INVALIDATED":
+            # Decision #6 (§19): the join key back to the originating
+            # MSS occurrence, plus that occurrence's own event_id when
+            # it was itself built into a MarketEvent (it always is,
+            # since MSS is always an accepted event_type here).
+            origin_index_value = row.get(
+                "mss_invalidated_origin_index"
+            )
+
+            if not pd.isna(origin_index_value):
+                origin_position = int(origin_index_value)
+                metadata["mss_origin_index"] = origin_position
+
+                origin_event_id = mss_event_id_by_origin_position.get(
+                    origin_position
+                )
+
+                if origin_event_id is not None:
+                    metadata["mss_origin_event_id"] = origin_event_id
+
+        # Decision #13 (§29): strength = break_distance /
+        # required_break_distance, populated whenever both inputs are
+        # available (break_distance and required_break_distance
+        # remain present in metadata alongside it, per the decision's
+        # own requirement — untouched above). Stays None wherever the
+        # ratio is not computable: MSS_INVALIDATED and CHoCH never set
+        # break_distance in state_machine.py (it is only ever produced
+        # by the close-driven MSS/BOS checks), so this falls through
+        # to None for them naturally, without a type-specific branch
+        # here. Also guarded against a required_break_distance of
+        # exactly 0 (e.g. minimum_break_atr configured to 0), which
+        # the specification does not address and which would
+        # otherwise raise ZeroDivisionError.
+        strength: Optional[float] = None
+
+        break_distance_value = metadata.get("break_distance")
+        required_break_distance_value = metadata.get(
+            "required_break_distance"
+        )
+
+        if (
+            break_distance_value is not None
+            and required_break_distance_value is not None
+            and required_break_distance_value != 0
+        ):
+            strength = (
+                break_distance_value / required_break_distance_value
+            )
+
         descriptions = {
             "BOS": (
                 f"{direction.capitalize()} continuation "
@@ -379,21 +278,31 @@ def _build_structure_events(
                 f"{direction.capitalize()} Market Structure "
                 "Shift detected."
             ),
+            "MSS_INVALIDATED": (
+                "Market Structure Shift invalidated; trend "
+                f"reasserted as {direction}."
+            ),
             "CHoCH": (
                 f"{direction.capitalize()} Change of Character "
                 "confirmed."
             ),
         }
 
+        event_id = f"EV_STR_{event_number:05d}"
+
+        if event_type == "MSS":
+            mss_event_id_by_origin_position[position] = event_id
+
         events.append(
             MarketEvent(
-                event_id=f"EV_STR_{event_number:05d}",
+                event_id=event_id,
                 event_type=event_type,
                 time=event_time,
                 index=position,
                 direction=direction,
                 price=_optional_float(row.get("close")),
                 broken_level=broken_level,
+                strength=strength,
                 source_type="MARKET_STRUCTURE",
                 description=descriptions[event_type],
                 metadata=metadata,
@@ -424,7 +333,6 @@ def _build_structure_snapshot(
         _first_existing_value(
             latest_row,
             "external_trend",
-            "advanced_trend",
             "trend_after_event",
         )
     ) or "neutral"
@@ -441,7 +349,6 @@ def _build_structure_snapshot(
             latest_row,
             "structure_state",
             "external_state",
-            "advanced_trend",
         )
     ) or external_trend
 
@@ -466,13 +373,9 @@ def _build_structure_snapshot(
 
     if "structure_event" in dataframe.columns:
         event_column = "structure_event"
-    elif "advanced_event" in dataframe.columns:
-        event_column = "advanced_event"
 
     if "event_direction" in dataframe.columns:
         direction_column = "event_direction"
-    elif "advanced_direction" in dataframe.columns:
-        direction_column = "advanced_direction"
 
     if event_column is not None:
         for position in range(len(dataframe) - 1, -1, -1):
@@ -636,8 +539,9 @@ def analyze_market(
     Raw OHLC candles
         -> Technical indicators
         -> Confirmed swing points
-        -> HH, HL, LH and LL classification
-        -> BOS, MSS and CHoCH state machine
+        -> Unified per-cycle HH/HL/LH/LL classification and
+           BOS/MSS/CHoCH state machine (SMC_SPECIFICATION.md §7,
+           Decision #3: a single forward pass, not two separate steps)
         -> Liquidity detection and registry
         -> Order Block detection and registry
         -> Unified market-event stream
@@ -690,13 +594,12 @@ def analyze_market(
     metadata:
         Optional user-defined metadata added to AnalysisResult.
     """
-    _validate_input(
-        candles,
+    _validate_parameters(
         symbol=symbol,
         timeframe=timeframe,
     )
 
-    prepared_candles = _prepare_candles(candles)
+    prepared_candles = validate_and_normalize_candles(candles)
 
     swing_kwargs = {
         "left_bars": 3,
@@ -742,21 +645,27 @@ def analyze_market(
     )
 
     # ---------------------------------------------------------
-    # 3. Swing structure classification
+    # 3. Institutional structure state machine
     # ---------------------------------------------------------
-
-    classified_dataframe = classify_market_structure(
-        swing_dataframe
-    )
-
-    # ---------------------------------------------------------
-    # 4. Institutional structure state machine
-    # ---------------------------------------------------------
+    #
+    # Decision #3 (SMC_SPECIFICATION.md §7): classification is no
+    # longer a separate prior pass. detect_structure_state now
+    # performs per-trend-cycle HH/HL/LH/LL classification itself, in
+    # the same unified forward pass as state-transition detection —
+    # §7 INVARIANT point 5 requires this, and point 6 prohibits a
+    # separate classification pass followed by reclassification. The
+    # legacy, globally-scoped classify_market_structure remains
+    # unchanged and continues to serve only the legacy
+    # /analysis/market-structure pipeline (main.py), per §7 point 7.
 
     structure_dataframe = detect_structure_state(
-        classified_dataframe,
+        swing_dataframe,
         **structure_kwargs,
     )
+
+    # ---------------------------------------------------------
+    # 4. Structure event construction
+    # ---------------------------------------------------------
 
     structure_events = _build_structure_events(
         structure_dataframe
@@ -814,7 +723,16 @@ def analyze_market(
 
     result_metadata: dict[str, Any] = {
         "engine": "analysis_engine",
-        "pipeline_version": "2.0.0",
+        # SMC_SPECIFICATION.md §33, "APPROVED SPEC — recorded per
+        # Decision #12": implementing Decision #12 (§28) "requires a
+        # MAJOR pipeline_version increment on implementation... not
+        # left as an implementation-time judgment call." Per standard
+        # semver (the scheme §33 itself follows), a MAJOR bump resets
+        # MINOR/PATCH to zero regardless of what accumulated since the
+        # prior "2.0.0" baseline (which was never itself incremented
+        # across Phases 1-5) — so the exact required value is 3.0.0,
+        # not a running count of the intervening additive changes.
+        "pipeline_version": "3.0.0",
         "input_candle_count": len(candles),
         "processed_candle_count": len(
             order_block_dataframe

@@ -9,7 +9,7 @@ from app.analysis.models import MarketEvent, OrderBlock
 from app.analysis.order_block_registry import OrderBlockRegistry
 
 
-SUPPORTED_STRUCTURE_EVENTS = {"BOS", "CHoCH"}
+SUPPORTED_STRUCTURE_EVENTS = {"BOS", "MSS", "CHoCH"}
 SUPPORTED_DIRECTIONS = {"bullish", "bearish"}
 
 
@@ -41,7 +41,7 @@ def _normalise_event_types(
         raise ValueError(
             "Unsupported source_event_types: "
             f"{', '.join(sorted(unsupported))}. "
-            "Supported values are BOS and CHoCH."
+            "Supported values are BOS, MSS, and CHoCH."
         )
 
     if not event_types:
@@ -138,7 +138,7 @@ def detect_order_blocks(
     classified: pd.DataFrame,
     *,
     atr_column: str = "atr14",
-    source_event_types: tuple[str, ...] = ("BOS", "CHoCH"),
+    source_event_types: tuple[str, ...] = ("BOS", "MSS", "CHoCH"),
     lookback_bars: int = 12,
     minimum_displacement_atr: float = 1.0,
     minimum_event_body_ratio: float = 0.55,
@@ -152,7 +152,7 @@ def detect_order_blocks(
 
     Creation rules
     --------------
-    1. A confirmed BOS or CHoCH must exist.
+    1. A confirmed BOS, MSS, or CHoCH must exist.
     2. The event direction must be bullish or bearish.
     3. The event candle must have a sufficiently strong real body.
     4. Price displacement from the source candle must meet the ATR filter.
@@ -169,6 +169,16 @@ def detect_order_blocks(
         Mitigated when a later candle trades into its range.
         Invalidated when a later candle closes above its distal level.
 
+    MSS-sourced blocks (Decision #12, SMC_SPECIFICATION.md §28,
+    Appendix B) additionally follow a provisional/confirmed lifecycle:
+    created with confirmation_status="provisional"; invalidated via
+    the MSS_INVALIDATED cascade if the originating MSS invalidates
+    (independent of price action); promoted in place to "confirmed"
+    (never duplicated) if the originating MSS instead resolves into a
+    CHoCH anchored on the same source candle. BOS- and CHoCH-sourced
+    blocks are always created "confirmed" and are never touched by the
+    cascade.
+
     Returns
     -------
     enriched_dataframe, order_block_registry, order_block_events
@@ -184,6 +194,7 @@ def detect_order_blocks(
         "structure_event",
         "event_direction",
         "broken_level",
+        "mss_invalidated_origin_index",
     }
 
     missing = required_columns.difference(classified.columns)
@@ -257,6 +268,11 @@ def detect_order_blocks(
     result["invalidated_order_block_id"] = pd.NA
     result["invalidation_price"] = pd.NA
 
+    # Decision #12 (§28 point 4): populated on the candle where a
+    # provisional (MSS-sourced) block is promoted to confirmed.
+    result["order_block_confirmed"] = False
+    result["confirmed_order_block_id"] = pd.NA
+
     result["order_block_expired"] = False
     result["expired_order_block_id"] = pd.NA
 
@@ -273,12 +289,39 @@ def detect_order_blocks(
         invalidation_confirmation_pips * pip_size
     )
 
+    # Decision #12 (§28 point 4): the pending MSS's own source_event_id,
+    # tracked locally by this engine as it observes the same
+    # structure_event stream state_machine.py produces — mirrors that
+    # module's own mss_origin_level/mss_origin_index tracking, but
+    # scoped here. Only ever set when an MSS-sourced block was actually
+    # created (nothing to promote otherwise); cleared the moment that
+    # MSS resolves, one way or the other. state_machine.py's own
+    # single-pending-MSS invariant (Sections 3/4 gated on
+    # current_state in {"bullish", "bearish"} only) guarantees no other
+    # BOS/MSS event can occur while one is already pending, so this
+    # requires no additional bookkeeping.
+    pending_mss_source_event_id: str | None = None
+
     for position, index in enumerate(result.index):
         current_time = _safe_datetime(result.at[index, "time"])
         current_open = _safe_float(result.at[index, "open"])
         current_high = _safe_float(result.at[index, "high"])
         current_low = _safe_float(result.at[index, "low"])
         current_close = _safe_float(result.at[index, "close"])
+
+        structure_event_value = result.at[index, "structure_event"]
+        event_direction_value = result.at[index, "event_direction"]
+
+        structure_event = None
+        event_direction = None
+
+        if not pd.isna(structure_event_value):
+            structure_event = str(structure_event_value)
+
+        if not pd.isna(event_direction_value):
+            event_direction = str(event_direction_value)
+
+        skip_creation_this_row = False
 
         # ---------------------------------------------------------
         # 1. Update existing active Order Blocks
@@ -536,6 +579,183 @@ def detect_order_blocks(
                         )
 
         # ---------------------------------------------------------
+        # 1b. MSS invalidation cascade (Decision #12, §28 point 3;
+        #     mirrors state_machine.py's MSS_INVALIDATED signal, §19).
+        # ---------------------------------------------------------
+
+        if structure_event == "MSS_INVALIDATED":
+            origin_index_value = result.at[
+                index, "mss_invalidated_origin_index"
+            ]
+
+            if not pd.isna(origin_index_value):
+                origin_position = int(origin_index_value)
+                origin_source_event_id = (
+                    f"STR_MSS_{origin_position:05d}"
+                )
+
+                for order_block in registry.by_source_event_id(
+                    origin_source_event_id
+                ):
+                    # Status transitions are one-way and already
+                    # terminal — the cascade only acts on still-active
+                    # blocks (§28 point 3).
+                    if order_block.status != "active":
+                        continue
+
+                    order_block.mark_invalidated(
+                        time=current_time,
+                        index=position,
+                        price=current_close,
+                        reason="mss_invalidated",
+                    )
+
+                    result.at[
+                        index, "order_block_invalidated"
+                    ] = True
+                    result.at[
+                        index, "invalidated_order_block_id"
+                    ] = order_block.order_block_id
+                    result.at[
+                        index, "invalidation_price"
+                    ] = current_close
+
+                    event_number += 1
+                    events.append(
+                        MarketEvent(
+                            event_id=(
+                                f"EV_OB_{event_number:05d}"
+                            ),
+                            event_type=(
+                                "ORDER_BLOCK_INVALIDATED"
+                            ),
+                            time=current_time,
+                            index=position,
+                            direction=(
+                                "bearish"
+                                if order_block.order_block_type
+                                == "bullish"
+                                else "bullish"
+                            ),
+                            price=current_close,
+                            source_id=(
+                                order_block.order_block_id
+                            ),
+                            source_type=(
+                                order_block.order_block_type
+                            ),
+                            description=(
+                                f"{order_block.order_block_type.title()} "
+                                "Order Block invalidated because its "
+                                "originating MSS invalidated."
+                            ),
+                            metadata={
+                                "distal_level": (
+                                    order_block.distal_level
+                                ),
+                                "invalidation_reason": (
+                                    "mss_invalidated"
+                                ),
+                                "mss_origin_index": origin_position,
+                            },
+                        )
+                    )
+
+            pending_mss_source_event_id = None
+
+        # ---------------------------------------------------------
+        # 1c. MSS -> CHoCH promotion (Decision #12, §28 point 4).
+        # ---------------------------------------------------------
+
+        if (
+            structure_event == "CHoCH"
+            and pending_mss_source_event_id is not None
+        ):
+            mss_sourced_block = None
+
+            for candidate in registry.by_source_event_id(
+                pending_mss_source_event_id
+            ):
+                if candidate.confirmation_status == "provisional":
+                    mss_sourced_block = candidate
+                    break
+
+            if mss_sourced_block is not None:
+                confirming_event_id = f"STR_CHoCH_{position:05d}"
+
+                mss_sourced_block.mark_confirmed(
+                    time=current_time,
+                    index=position,
+                    confirming_event_id=confirming_event_id,
+                    confirming_event_type="CHoCH",
+                )
+
+                result.at[index, "order_block_confirmed"] = True
+                result.at[
+                    index, "confirmed_order_block_id"
+                ] = mss_sourced_block.order_block_id
+
+                event_number += 1
+                events.append(
+                    MarketEvent(
+                        event_id=f"EV_OB_{event_number:05d}",
+                        event_type="ORDER_BLOCK_CONFIRMED",
+                        time=current_time,
+                        index=position,
+                        direction=(
+                            mss_sourced_block.order_block_type
+                        ),
+                        price=mss_sourced_block.proximal_level,
+                        source_id=(
+                            mss_sourced_block.order_block_id
+                        ),
+                        source_type=(
+                            mss_sourced_block.order_block_type
+                        ),
+                        description=(
+                            f"{mss_sourced_block.order_block_type.title()} "
+                            "Order Block confirmed: its originating "
+                            "MSS resolved into a confirmed CHoCH."
+                        ),
+                        metadata={
+                            "source_event_id": (
+                                mss_sourced_block.source_event_id
+                            ),
+                            "confirming_event_id": (
+                                confirming_event_id
+                            ),
+                        },
+                    )
+                )
+
+                # Dedup key = candle_index alone (§28 point 4). A
+                # match means this same CHoCH would otherwise create a
+                # duplicate footprint on the identical anchor candle —
+                # skip Section 3's creation for this row. A mismatch
+                # means CHoCH resolved to a different anchor; Section
+                # 3 proceeds and creates an independent, separately-
+                # tracked CHoCH-sourced block, while the promotion
+                # above still stands on its own.
+                choch_source_candle = None
+
+                if event_direction is not None:
+                    choch_source_candle = _find_order_block_candle(
+                        result,
+                        event_position=position,
+                        direction=event_direction,
+                        lookback_bars=lookback_bars,
+                    )
+
+                if (
+                    choch_source_candle is not None
+                    and choch_source_candle[0]
+                    == mss_sourced_block.candle_index
+                ):
+                    skip_creation_this_row = True
+
+            pending_mss_source_event_id = None
+
+        # ---------------------------------------------------------
         # 2. Expire old active Order Blocks
         # ---------------------------------------------------------
 
@@ -560,27 +780,10 @@ def detect_order_blocks(
         # 3. Detect a new institutional Order Block
         # ---------------------------------------------------------
 
-        structure_event_value = result.at[
-            index,
-            "structure_event",
-        ]
-        event_direction_value = result.at[
-            index,
-            "event_direction",
-        ]
-
-        structure_event = None
-        event_direction = None
-
-        if not pd.isna(structure_event_value):
-            structure_event = str(structure_event_value)
-
-        if not pd.isna(event_direction_value):
-            event_direction = str(event_direction_value)
-
         eligible_event = (
             structure_event in enabled_event_types
             and event_direction in SUPPORTED_DIRECTIONS
+            and not skip_creation_this_row
         )
 
         if eligible_event and position > 0:
@@ -712,6 +915,16 @@ def detect_order_blocks(
                                 close=source_close,
                                 proximal_level=proximal_level,
                                 distal_level=distal_level,
+                                # Decision #12 (§28 point 2): MSS-sourced
+                                # blocks start provisional; BOS/CHoCH-
+                                # sourced blocks are terminal by
+                                # construction and use the dataclass's
+                                # own "confirmed" default.
+                                confirmation_status=(
+                                    "provisional"
+                                    if structure_event == "MSS"
+                                    else "confirmed"
+                                ),
                                 source_event_id=source_event_id,
                                 source_event_type=(
                                     structure_event
@@ -752,6 +965,16 @@ def detect_order_blocks(
                             )
 
                             registry.add(order_block)
+
+                            if structure_event == "MSS":
+                                # Decision #12 (§28 point 4): remember
+                                # this MSS occurrence's own block for
+                                # the promotion check (Section 1c)
+                                # whenever its eventual CHoCH (if any)
+                                # confirms on a later row.
+                                pending_mss_source_event_id = (
+                                    source_event_id
+                                )
 
                             result.at[
                                 index,
@@ -809,7 +1032,12 @@ def detect_order_blocks(
                                     description=(
                                         f"{event_direction.title()} "
                                         "Order Block created after "
-                                        f"confirmed {structure_event}."
+                                        # "confirmed" is deliberately
+                                        # omitted: MSS is tentative
+                                        # (§2), not confirmed, so this
+                                        # wording stays accurate for
+                                        # BOS/MSS/CHoCH alike.
+                                        f"{structure_event}."
                                     ),
                                     metadata={
                                         "source_event_id": (
