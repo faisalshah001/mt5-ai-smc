@@ -31,7 +31,16 @@ def get_candles(
     Parameters:
     - symbol: Trading symbol, for example EURUSD
     - timeframe: M1, M5, M15, M30, H1, H4, or D1
-    - count: Number of candles to retrieve
+    - count: Number of closed candles to retrieve
+
+    Only fully closed candles are ever returned. MetaTrader5's
+    mt5.copy_rates_from_pos(..., start_pos=0, ...) documents position 0
+    as the current, still-forming bar -- empirically confirmed against
+    a live terminal (its OHLC/tick_volume kept mutating across repeated
+    fetches of the same bar timestamp). One extra bar is therefore
+    requested and the most recent (still-forming) row is always dropped
+    before returning, so the analysis engine never receives a candle
+    whose values can still change.
     """
 
     clean_symbol = symbol.strip().upper()
@@ -58,7 +67,7 @@ def get_candles(
         clean_symbol,
         TIMEFRAMES[clean_timeframe],
         0,
-        count,
+        count + 1,
     )
 
     if rates is None:
@@ -86,6 +95,24 @@ def get_candles(
 
         raise ValueError(
             f"No candle data returned for "
+            f"{clean_symbol} {clean_timeframe}."
+        )
+
+    # Drop the current, still-forming bar (see docstring) -- it is
+    # always the most recent row, regardless of how many rows MT5
+    # actually returned.
+    frame = frame.iloc[:-1].reset_index(drop=True)
+
+    if frame.empty:
+        logger.warning(
+            "MT5 returned only the current, still-forming candle for "
+            "%s %s; no closed candle data is available yet.",
+            clean_symbol,
+            clean_timeframe,
+        )
+
+        raise ValueError(
+            f"No closed candle data available for "
             f"{clean_symbol} {clean_timeframe}."
         )
 
