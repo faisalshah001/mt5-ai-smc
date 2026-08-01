@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Callable, Mapping, Optional
 
 import pandas as pd
@@ -358,6 +359,80 @@ def evaluate_m5_confirmation(
     }
 
 
+# Frozen rule (Finding 3, approved): the maximum distance beyond the
+# Order Block's proximal edge that an M5-derived entry price may still
+# occupy, expressed as a fraction of the block's own recorded M15 ATR.
+ENTRY_PROXIMAL_TOLERANCE_ATR = 0.25
+
+
+def evaluate_entry_within_order_block(
+    order_block: OrderBlock,
+    entry_price: float,
+) -> bool:
+    """
+    Finding 3 fix: confirm the M5-derived entry price is still
+    anchored to the M15 Order Block supplying the stop-loss, rather
+    than an unrelated price level the market has since drifted to.
+
+    Frozen rule (approved):
+    1. An entry inside the Order Block's own range
+       (order_block.low <= entry_price <= order_block.high) is always
+       valid.
+    2. An entry beyond the proximal edge is also accepted, but only up
+       to ENTRY_PROXIMAL_TOLERANCE_ATR (0.25) multiplied by the Order
+       Block's own recorded M15 ATR -- order_block.metadata["atr"],
+       the same ATR value order_blocks.py already computed and stored
+       when this block was created. No new ATR is calculated here.
+    3. No tolerance exists beyond the distal edge: an entry on the far
+       side of the block is always rejected, matching this block's own
+       existing price-penetration invalidation rule in order_blocks.py.
+
+    For a bullish block, proximal_level equals order_block.high (price
+    approaches the block from above) and distal_level equals
+    order_block.low. For a bearish block, proximal_level equals
+    order_block.low (price approaches from below) and distal_level
+    equals order_block.high -- see order_blocks.py's own proximal/
+    distal assignment. The tolerance therefore always extends outward
+    from the proximal edge, away from the distal edge, regardless of
+    direction.
+
+    Defensive ATR validation: order_blocks.py always stores a finite,
+    positive float here, so this guard is not expected to ever reject
+    a real Order Block -- it exists purely to fail closed (False, i.e.
+    no tolerance -- containment alone still applies) instead of
+    raising, should metadata["atr"] ever be missing, None, NaN,
+    infinite, non-numeric, zero, or negative. isinstance() is checked
+    before math.isfinite()/the sign comparison specifically so a
+    non-numeric value (e.g. a string) is rejected by the type check
+    and never reaches a comparison that would raise TypeError.
+    """
+
+    if order_block.low <= entry_price <= order_block.high:
+        return True
+
+    atr = order_block.metadata.get("atr") if order_block.metadata else None
+
+    if (
+        not isinstance(atr, (int, float))
+        or not math.isfinite(atr)
+        or atr <= 0
+    ):
+        return False
+
+    tolerance = ENTRY_PROXIMAL_TOLERANCE_ATR * atr
+    proximal = order_block.proximal_level
+    distal = order_block.distal_level
+
+    if proximal >= distal:
+        # Bullish block: the tolerance band sits above the proximal
+        # edge (order_block.high), away from the distal edge.
+        return proximal < entry_price <= proximal + tolerance
+
+    # Bearish block: the tolerance band sits below the proximal edge
+    # (order_block.low), away from the distal edge.
+    return proximal - tolerance <= entry_price < proximal
+
+
 def _displacement_evidence(order_block: OrderBlock) -> dict[str, Any]:
     """Build the 'displacement' evidence entry from an Order Block."""
 
@@ -437,7 +512,7 @@ def generate_eurusd_manual_signal(
         H4 bias -> H1 confirmation -> M15 liquidity sweep -> M15
         confirmed CHoCH -> M15 displacement -> M15 linked Order Block
         -> M15 retracement into the Order Block -> M5 execution
-        confirmation -> risk validation.
+        confirmation -> entry-zone validation -> risk validation.
 
     This function NEVER places an order. It only returns a trade
     proposal dict for a human to review and manually execute. No
@@ -685,11 +760,22 @@ def generate_eurusd_manual_signal(
 
     evidence["m5_confirmation"] = m5_confirmation
 
+    entry_price = m5_confirmation["close_price"]
+
+    if not evaluate_entry_within_order_block(order_block, entry_price):
+        rejection_reasons.append(
+            f"M5 entry price {entry_price} has drifted outside the "
+            f"M15 Order Block [{order_block.low}, {order_block.high}] "
+            f"beyond its {ENTRY_PROXIMAL_TOLERANCE_ATR} ATR proximal-"
+            "edge tolerance; the M5 confirmation no longer corresponds "
+            "to the zone supplying the stop-loss."
+        )
+        return _rejected("NO_SETUP")
+
     # -----------------------------------------------------------
     # Step 9: risk validation.
     # -----------------------------------------------------------
 
-    entry_price = m5_confirmation["close_price"]
     stop_loss_price = order_block.distal_level
 
     try:

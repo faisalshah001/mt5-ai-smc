@@ -25,6 +25,7 @@ from app.strategies.smc_manual_signal import (
     SYMBOL,
     evaluate_choch,
     evaluate_displacement_and_order_block,
+    evaluate_entry_within_order_block,
     evaluate_h1_confirmation,
     evaluate_h4_bias,
     evaluate_liquidity_sweep,
@@ -65,7 +66,14 @@ def _order_block(
     confirmed_index=None,
     distal_level=1.0900,
     proximal_level=1.0950,
+    metadata=None,
 ) -> OrderBlock:
+    # high/low are always the max/min of distal and proximal -- matching
+    # order_blocks.py, where high/low are the source candle's literal
+    # high/low, while proximal/distal are assigned per direction (see
+    # evaluate_entry_within_order_block's docstring). Deriving them here
+    # keeps bearish fixtures (proximal < distal) correctly oriented,
+    # instead of requiring every caller to pre-swap the values by hand.
     return OrderBlock(
         order_block_id="OB_TEST",
         order_block_type=order_block_type,
@@ -73,8 +81,8 @@ def _order_block(
         created_index=created_index,
         candle_time=TIME,
         candle_index=created_index - 1,
-        high=proximal_level,
-        low=distal_level,
+        high=max(distal_level, proximal_level),
+        low=min(distal_level, proximal_level),
         open=distal_level,
         close=proximal_level,
         proximal_level=proximal_level,
@@ -84,6 +92,7 @@ def _order_block(
         invalidated=invalidated,
         expired=expired,
         mitigated=mitigated,
+        metadata=metadata or {},
     )
 
 
@@ -327,6 +336,165 @@ class TestEvaluateRetracement:
 
 
 # ---------------------------------------------------------------
+# Unit tests: evaluate_entry_within_order_block (Finding 3)
+#
+# Bullish block: distal=1.0900 (low/far edge), proximal=1.0950
+# (high/near edge, price approaches from above). ATR=0.0020 ->
+# tolerance = 0.25 * 0.0020 = 0.0005.
+#
+# Bearish block: proximal=1.0950 (low/near edge, price approaches
+# from below), distal=1.1000 (high/far edge). Same ATR/tolerance,
+# mirrored.
+# ---------------------------------------------------------------
+
+
+class TestEvaluateEntryWithinOrderBlock:
+    def test_entry_inside_order_block_is_accepted(self):
+        block = _order_block(
+            order_block_type="bullish",
+            distal_level=1.0900,
+            proximal_level=1.0950,
+            metadata={"atr": 0.0020},
+        )
+        assert evaluate_entry_within_order_block(block, 1.0925) is True
+
+    def test_entry_within_proximal_tolerance_is_accepted(self):
+        block = _order_block(
+            order_block_type="bullish",
+            distal_level=1.0900,
+            proximal_level=1.0950,
+            metadata={"atr": 0.0020},
+        )
+        # 0.0003 beyond proximal (1.0950), within the 0.0005 tolerance.
+        assert evaluate_entry_within_order_block(block, 1.0953) is True
+
+    def test_entry_beyond_proximal_tolerance_is_rejected(self):
+        block = _order_block(
+            order_block_type="bullish",
+            distal_level=1.0900,
+            proximal_level=1.0950,
+            metadata={"atr": 0.0020},
+        )
+        # 0.0010 beyond proximal (1.0950), past the 0.0005 tolerance.
+        assert evaluate_entry_within_order_block(block, 1.0960) is False
+
+    def test_entry_beyond_distal_edge_is_rejected(self):
+        block = _order_block(
+            order_block_type="bullish",
+            distal_level=1.0900,
+            proximal_level=1.0950,
+            metadata={"atr": 0.0020},
+        )
+        # Only 0.0001 beyond distal (1.0900) -- well within what the
+        # 0.0005 tolerance would allow if it were symmetric. Must
+        # still be rejected: no tolerance exists on the distal side.
+        assert evaluate_entry_within_order_block(block, 1.0899) is False
+
+    def test_bearish_entry_inside_order_block_is_accepted(self):
+        block = _order_block(
+            order_block_type="bearish",
+            proximal_level=1.0950,
+            distal_level=1.1000,
+            metadata={"atr": 0.0020},
+        )
+        assert evaluate_entry_within_order_block(block, 1.0975) is True
+
+    def test_bearish_entry_within_proximal_tolerance_is_accepted(self):
+        block = _order_block(
+            order_block_type="bearish",
+            proximal_level=1.0950,
+            distal_level=1.1000,
+            metadata={"atr": 0.0020},
+        )
+        # 0.0003 below proximal (1.0950), within the 0.0005 tolerance.
+        assert evaluate_entry_within_order_block(block, 1.0947) is True
+
+    def test_bearish_entry_beyond_proximal_tolerance_is_rejected(self):
+        block = _order_block(
+            order_block_type="bearish",
+            proximal_level=1.0950,
+            distal_level=1.1000,
+            metadata={"atr": 0.0020},
+        )
+        # 0.0010 below proximal (1.0950), past the 0.0005 tolerance.
+        assert evaluate_entry_within_order_block(block, 1.0940) is False
+
+    def test_bearish_entry_beyond_distal_edge_is_rejected(self):
+        block = _order_block(
+            order_block_type="bearish",
+            proximal_level=1.0950,
+            distal_level=1.1000,
+            metadata={"atr": 0.0020},
+        )
+        # Only 0.0001 beyond distal (1.1000) -- well within what the
+        # 0.0005 tolerance would allow if it were symmetric. Must
+        # still be rejected: no tolerance exists on the distal side.
+        assert evaluate_entry_within_order_block(block, 1.1001) is False
+
+
+# ---------------------------------------------------------------
+# Unit tests: evaluate_entry_within_order_block ATR-validation
+# hardening.
+#
+# entry_price=1.0960 lies outside the Order Block's own range
+# (order_block.low=1.0900, high=1.0950) and would only ever be
+# accepted via the proximal-edge tolerance branch -- so any of these
+# invalid-ATR cases returning True (or raising) would mean the guard
+# failed to fail closed.
+# ---------------------------------------------------------------
+
+
+class TestEvaluateEntryWithinOrderBlockAtrSafety:
+    def test_none_atr_fails_closed(self):
+        block = _order_block(
+            distal_level=1.0900,
+            proximal_level=1.0950,
+            metadata={"atr": None},
+        )
+        assert evaluate_entry_within_order_block(block, 1.0960) is False
+
+    def test_nan_atr_fails_closed(self):
+        block = _order_block(
+            distal_level=1.0900,
+            proximal_level=1.0950,
+            metadata={"atr": float("nan")},
+        )
+        assert evaluate_entry_within_order_block(block, 1.0960) is False
+
+    def test_positive_infinity_atr_fails_closed(self):
+        block = _order_block(
+            distal_level=1.0900,
+            proximal_level=1.0950,
+            metadata={"atr": float("inf")},
+        )
+        assert evaluate_entry_within_order_block(block, 1.0960) is False
+
+    def test_string_atr_fails_closed_without_raising(self):
+        block = _order_block(
+            distal_level=1.0900,
+            proximal_level=1.0950,
+            metadata={"atr": "not-a-number"},
+        )
+        assert evaluate_entry_within_order_block(block, 1.0960) is False
+
+    def test_zero_atr_fails_closed(self):
+        block = _order_block(
+            distal_level=1.0900,
+            proximal_level=1.0950,
+            metadata={"atr": 0.0},
+        )
+        assert evaluate_entry_within_order_block(block, 1.0960) is False
+
+    def test_negative_atr_fails_closed(self):
+        block = _order_block(
+            distal_level=1.0900,
+            proximal_level=1.0950,
+            metadata={"atr": -0.0020},
+        )
+        assert evaluate_entry_within_order_block(block, 1.0960) is False
+
+
+# ---------------------------------------------------------------
 # Unit tests: evaluate_m5_confirmation
 # ---------------------------------------------------------------
 
@@ -509,12 +677,38 @@ class _FakeMT5:
         }
 
 
+def _shift_price(candles: pd.DataFrame, delta: float) -> pd.DataFrame:
+    """
+    Apply a uniform price shift to a candle series (open/high/low/
+    close). Every swing/ATR/displacement relationship in the analysis
+    engine depends only on price *differences*, so a uniform shift
+    changes nothing structurally -- it only moves the absolute price
+    level. Used below to re-anchor the M5 fixture's own natural entry
+    price back inside the Finding 3 Order Block tolerance, without
+    touching the shared, independently-verified fixture builders in
+    tests/helpers/candles.py.
+    """
+
+    shifted = candles.copy()
+
+    for column in ("open", "high", "low", "close"):
+        shifted[column] = shifted[column] + delta
+
+    return shifted
+
+
 @pytest.fixture
 def bullish_fixtures():
+    # build_ict_m5_sequence_candles()'s own natural entry price lands
+    # ~15.5 pips beyond the M15 Order Block's proximal edge (Finding
+    # 3) -- shifted here, uniformly, back inside the Order Block's
+    # 0.25 ATR tolerance band, so this fixture represents a genuinely
+    # valid ICT setup under evaluate_entry_within_order_block. See
+    # TestEntryZoneFinding3 for tests against the *unshifted* fixture.
     return {
         "h4_h1": build_ict_bias_candles(),
         "m15": build_ict_m15_sequence_candles(),
-        "m5": build_ict_m5_sequence_candles(),
+        "m5": _shift_price(build_ict_m5_sequence_candles(), -0.0050),
     }
 
 
@@ -681,6 +875,72 @@ class TestGenerateEurusdManualSignalIntegration:
 
         assert result["status"] == "NO_SETUP"
         assert result["evidence"]["choch"] == {}
+
+
+class TestEntryZoneFinding3:
+    """
+    Finding 3: the M5-derived entry price must remain anchored to the
+    M15 Order Block supplying the stop-loss. Uses the real engine
+    (analyze_market) end to end, not hand-built stubs.
+    """
+
+    def test_unshifted_golden_path_fixture_is_now_rejected(self):
+        """
+        The *original*, unmodified build_ict_m5_sequence_candles()
+        fixture -- what the golden-path tests relied on before this
+        fix -- produces an entry price ~15.5 pips beyond the M15
+        Order Block's proximal edge, well past the 0.25 ATR tolerance.
+        Before this fix this fixture produced SIGNAL_PENDING_APPROVAL
+        undetected; it must now be correctly rejected.
+        """
+
+        fixtures = {
+            "h4_h1": build_ict_bias_candles(),
+            "m15": build_ict_m15_sequence_candles(),
+            "m5": build_ict_m5_sequence_candles(),  # unshifted
+        }
+
+        result = _generate(fixtures)
+
+        assert result["status"] == "NO_SETUP"
+        assert any(
+            "drifted outside the M15 Order Block" in reason
+            for reason in result["rejection_reasons"]
+        )
+
+    def test_deliberately_shifted_m5_counterexample_is_rejected(self, bullish_fixtures):
+        """A larger, deliberate M5 price drift must also be rejected."""
+
+        shifted_m5 = _shift_price(bullish_fixtures["m5"], 0.0500)
+
+        result = _generate({**bullish_fixtures, "m5": shifted_m5})
+
+        assert result["status"] == "NO_SETUP"
+        assert any(
+            "drifted outside the M15 Order Block" in reason
+            for reason in result["rejection_reasons"]
+        )
+
+    def test_corrected_golden_path_entry_is_confirmed_within_order_block(self, bullish_fixtures):
+        """The corrected bullish_fixtures fixture's entry must fall
+        inside the selected M15 Order Block's own range."""
+
+        result = _generate(bullish_fixtures)
+
+        assert result["status"] == "SIGNAL_PENDING_APPROVAL"
+
+        ob = result["evidence"]["order_block"]
+        assert ob["low"] <= result["entry"] <= ob["high"]
+
+    def test_corrected_bearish_golden_path_entry_is_confirmed_within_order_block(self, bearish_fixtures):
+        """BUY/SELL mirror of the above, via the reflected fixtures."""
+
+        result = _generate(bearish_fixtures)
+
+        assert result["status"] == "SIGNAL_PENDING_APPROVAL"
+
+        ob = result["evidence"]["order_block"]
+        assert ob["low"] <= result["entry"] <= ob["high"]
 
 
 class TestAnalyzeMarketWiringSanityCheck:
