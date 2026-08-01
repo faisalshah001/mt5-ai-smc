@@ -29,6 +29,10 @@ htmlcov/
 # Logs
 *.log
 
+# Forward-test recorder output (scripts/forward_test_recorder.py) --
+# locally generated operational data, not source.
+/logs/
+
 # OS
 .DS_Store
 Thumbs.db
