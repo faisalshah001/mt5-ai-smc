@@ -219,6 +219,32 @@ class TestEvaluateLiquiditySweep:
         result = evaluate_liquidity_sweep(_analysis_result(events=[]), "bullish", before_index=10)
         assert result is None
 
+    def test_old_sweep_from_previous_cycle_is_rejected(self):
+        """Finding 2: a sweep from an earlier, already-resolved cycle
+        (before the previous cycle's own CHoCH) must not satisfy a
+        later, unrelated CHoCH."""
+        events = [
+            _event("LIQUIDITY_SWEPT", "bullish", 2, broken_level=1.05),  # stale, from an earlier cycle
+            _event("CHoCH", "bearish", 8, broken_level=1.07),  # previous cycle's own end
+            _event("MSS", "bullish", 10, broken_level=1.09),  # this cycle's MSS
+        ]
+        result = evaluate_liquidity_sweep(_analysis_result(events=events), "bullish", before_index=15)
+        assert result is None
+
+    def test_sweep_inside_current_cycle_is_accepted(self):
+        """Finding 2: a sweep occurring after the previous cycle's own
+        end is accepted even though it precedes this cycle's own MSS
+        -- the normal ICT order, where the sweep triggers the break."""
+        events = [
+            _event("LIQUIDITY_SWEPT", "bullish", 2, broken_level=1.05),  # stale, from an earlier cycle
+            _event("CHoCH", "bearish", 8, broken_level=1.07),  # previous cycle's own end
+            _event("LIQUIDITY_SWEPT", "bullish", 9, broken_level=1.08),  # belongs to this cycle
+            _event("MSS", "bullish", 10, broken_level=1.09),
+        ]
+        result = evaluate_liquidity_sweep(_analysis_result(events=events), "bullish", before_index=15)
+        assert result is not None
+        assert result["index"] == 9
+
 
 # ---------------------------------------------------------------
 # Unit tests: evaluate_displacement_and_order_block

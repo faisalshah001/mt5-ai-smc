@@ -139,14 +139,60 @@ def evaluate_choch(
     }
 
 
+def _find_current_cycle_start_index(
+    m15_result: AnalysisResult,
+    before_index: int,
+) -> int:
+    """
+    Locate the start of the trend cycle that produced the CHoCH at
+    `before_index` (Finding 2 fix).
+
+    A trend cycle ends only at a confirmed CHoCH (of either direction)
+    or an MSS_INVALIDATED -- Decision #3 (SMC_SPECIFICATION.md §7)
+    establishes that "MSS alone never ends a cycle", so an MSS event
+    itself is not a valid lower bound: in real ICT sequencing, the
+    liquidity sweep is what *triggers* the break of structure, so it
+    routinely PRECEDES its own cycle's MSS event, not follows it (see
+    tests/helpers/candles.py::build_ict_m15_sequence_candles, a
+    verified fixture with exactly this sweep-before-MSS order).
+
+    The correct "same cycle" lower bound is therefore the end of the
+    PREVIOUS cycle: the most recent CHoCH (either direction) or
+    MSS_INVALIDATED strictly before `before_index`, plus one (that
+    boundary row itself belongs to the cycle it completes, per
+    state_machine.py's own cycle-reset comments -- never to the cycle
+    that follows it). This still rejects Finding 2's stale-sweep
+    scenario, since a sweep from an even earlier, already-resolved
+    cycle sits before that boundary, while correctly accepting a
+    sweep that precedes its own cycle's MSS.
+
+    Returns 0 (start of the fetched window) if no earlier CHoCH or
+    MSS_INVALIDATED exists -- i.e. `before_index` is in the first
+    cycle visible in this candle window.
+    """
+
+    boundary_events = [
+        event
+        for event in m15_result.events
+        if event.event_type in ("CHoCH", "MSS_INVALIDATED")
+        and event.index < before_index
+    ]
+
+    if not boundary_events:
+        return 0
+
+    return max(boundary_events, key=lambda event: event.index).index + 1
+
+
 def evaluate_liquidity_sweep(
     m15_result: AnalysisResult,
     direction: str,
     before_index: int,
 ) -> Optional[dict[str, Any]]:
     """
-    Step 3: liquidity sweep on M15, occurring before the confirmed
-    CHoCH found by evaluate_choch.
+    Step 3: liquidity sweep on M15, occurring within the same trend
+    cycle as the confirmed CHoCH found by evaluate_choch -- not merely
+    anywhere earlier in the series (Finding 2 fix).
 
     A BUY requires a sell-side (SSL) sweep, which the liquidity engine
     already records with direction="bullish" (a sweep below sell-side
@@ -155,14 +201,25 @@ def evaluate_liquidity_sweep(
     Filtering LIQUIDITY_SWEPT events by `direction == direction`
     therefore selects the correct side automatically, with no new
     sweep-detection logic.
+
+    A sweep is only accepted when
+    cycle_start_index <= sweep.index <= before_index, where
+    cycle_start_index is the end of the previous cycle (see
+    _find_current_cycle_start_index) -- excluding sweeps left over
+    from an earlier, already-resolved cycle.
     """
+
+    cycle_start_index = _find_current_cycle_start_index(
+        m15_result,
+        before_index,
+    )
 
     sweeps = [
         event
         for event in m15_result.events
         if event.event_type == "LIQUIDITY_SWEPT"
         and event.direction == direction
-        and event.index <= before_index
+        and cycle_start_index <= event.index <= before_index
     ]
 
     if not sweeps:
